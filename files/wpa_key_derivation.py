@@ -99,9 +99,16 @@ pmk = pbkdf2(hashlib.sha1, passphrase, ssid, 4096, 32)
 # expand pmk to obtain PTK
 ptk = custom_prf512(pmk, a, b)
 
+# Le champ Key Information est sur 2 bytes. Il y a 1 byte avant ces 2 là (Key Descriptor Type) qui ne nous intéresse
+# pas. Du champ Key Information, seul les 2 premiers bits (Key Descriptor Version) nous intéresse. Il indique
+# l'algorithme de hashage utilisé pour calculer le MIC. 1: HMAC-MD5 ; 2: HMAC-SHA1-128.
+key_desc_version = list_eapol[3]['EAPOL'].load[2] & 0x03
+hash_algo = hashlib.md5 if key_desc_version == 1 else hashlib.sha1
+
 # calculate MIC over EAPOL payload (Michael) - The ptk is, in fact, KCK|KEK|TK|MICK
-# on prend les 128 premiers bits des 160 de sortie – indiqué dans les specs
-mic = hmac.new(ptk[0:16], data, hashlib.sha1).hexdigest()[:32]
+# Si l'algo est HMAC-SHA1 on prend les 128 premiers bits des 160 de sortie,
+# si c'est HMAC-MD5, la sortie fait déjà 128 bits.
+mic = hmac.new(ptk[0:16], data, hash_algo).hexdigest()[:32]
 
 print("\nResults of the key expansion")
 print("============================")

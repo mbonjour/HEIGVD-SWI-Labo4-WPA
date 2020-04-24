@@ -81,6 +81,12 @@ data = ("{0:#0{1}x}".format(list_eapol[3]["EAPOL"].version, 4)[2:] +
         list_eapol[3].load.hex()[:153]).ljust(198, '0')
 data = a2b_hex(data)
 
+# Le champ Key Information est sur 2 bytes. Il y a 1 byte avant ces 2 là (Key Descriptor Type) qui ne nous intéresse
+# pas. Du champ Key Information, seul les 2 premiers bits (Key Descriptor Version) nous intéresse. Il indique
+# l'algorithme de hashage utilisé pour calculer le MIC. 1: HMAC-MD5 ; 2: HMAC-SHA1-128.
+key_desc_version = list_eapol[3]['EAPOL'].load[2] & 0x03
+hash_algo = hashlib.md5 if key_desc_version == 1 else hashlib.sha1
+
 # This is the MIC contained in the 4th frame of the 4-way handshake. I copied it by hand.
 # When trying to crack the WPA passphrase, we will compare it to our own MIC calculated using passphrases from a
 # dictionary.txt
@@ -109,8 +115,9 @@ for word in words:
     ptk = custom_prf512(pmk, str.encode(a), b)
 
     # calculate MIC over EAPOL payload (Michael) - The ptk is, in fact, KCK|KEK|TK|MICK
-    # on prend les 128 premiers bits des 160 de sortie – indiqué dans les specs
-    mic = hmac.new(ptk[0:16], data, hashlib.sha1).hexdigest()[0:32]
+    # Si l'algo est HMAC-SHA1 on prend les 128 premiers bits des 160 de sortie,
+    # si c'est HMAC-MD5, la sortie fait déjà 128 bits.
+    mic = hmac.new(ptk[0:16], data, hash_algo).hexdigest()[0:32]
 
     print("\nResults of the key expansion")
     print("============================")
