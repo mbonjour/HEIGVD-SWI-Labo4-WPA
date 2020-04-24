@@ -109,7 +109,8 @@ for word in words:
     ptk = custom_prf512(pmk, str.encode(a), b)
 
     # calculate MIC over EAPOL payload (Michael) - The ptk is, in fact, KCK|KEK|TK|MICK
-    mic = hmac.new(ptk[0:16], data, hashlib.sha1)
+    # on prend les 128 premiers bits des 160 de sortie – indiqué dans les specs
+    mic = hmac.new(ptk[0:16], data, hashlib.sha1).hexdigest()[0:32]
 
     print("\nResults of the key expansion")
     print("============================")
@@ -119,10 +120,10 @@ for word in words:
     print("KEK:\t\t", ptk[16:32].hex())
     print("TK:\t\t", ptk[32:48].hex())
     print("MICK:\t\t", ptk[48:64].hex())
-    print("MIC:\t\t", mic.hexdigest())
+    print("MIC:\t\t", mic)
     print("MIC to test:\t", mic_to_test)
 
-    if mic.hexdigest()[0:32] == mic_to_test:
+    if mic == mic_to_test:
         print("Success! With this passphrase " + str(word))
         success = True
         break

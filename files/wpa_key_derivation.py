@@ -41,7 +41,6 @@ def custom_prf512(key, a, b):
 # Read capture file -- it contains beacon, authentication, associacion, handshake and data
 wpa = rdpcap("wpa_handshake.cap")
 
-# TODO: Translate
 # We analyze the capture and take the EAPOL (Handshake packets) in the order of apparition and the beacons to be able to
 # get the SSID
 list_eapol = []
@@ -101,7 +100,8 @@ pmk = pbkdf2(hashlib.sha1, passphrase, ssid, 4096, 32)
 ptk = custom_prf512(pmk, a, b)
 
 # calculate MIC over EAPOL payload (Michael) - The ptk is, in fact, KCK|KEK|TK|MICK
-mic = hmac.new(ptk[0:16], data, hashlib.sha1)
+# on prend les 128 premiers bits des 160 de sortie – indiqué dans les specs
+mic = hmac.new(ptk[0:16], data, hashlib.sha1).hexdigest()[:32]
 
 print("\nResults of the key expansion")
 print("============================")
@@ -111,4 +111,4 @@ print("KCK:\t\t", ptk[0:16].hex())
 print("KEK:\t\t", ptk[16:32].hex())
 print("TK:\t\t", ptk[32:48].hex())
 print("MICK:\t\t", ptk[48:64].hex())
-print("MIC:\t\t", mic.hexdigest())
+print("MIC:\t\t", mic)
